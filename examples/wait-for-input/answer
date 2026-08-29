@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+if test "$#" -lt 2 || test "$#" -gt 3; then
+    printf 'usage: %s WORKDIR JOB [TEND]\n' "$0" >&2
+    exit 2
+fi
+
+workdir=$1
+job=$2
+tend=${3:-tend}
+mailbox=$workdir/.tend-wait
+response=$mailbox/$job.response
+temporary=$mailbox/.$job.response.$$
+
+umask 077
+mkdir -p "$mailbox"
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+cat >"$temporary"
+mv "$temporary" "$response"
+trap - EXIT HUP INT TERM
+
+# The file is the data plane. The durable signal is the control-plane wakeup.
+"$tend" signal "$job" user-input <"$response"

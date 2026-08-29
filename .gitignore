@@ -1,0 +1,4 @@
+/tend
+*.db
+*.db-shm
+*.db-wal

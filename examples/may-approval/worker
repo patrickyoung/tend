@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+may=${MAY:-may}
+action_file=${MAY_ACTION_FILE:-may-action}
+
+if test ! -f "$action_file"; then
+    printf 'missing action file: %s\n' "$action_file" >&2
+    exit 2
+fi
+
+rc=0
+"$may" "$TEND_JOB_ID" <"$action_file" || rc=$?
+
+case $rc in
+    0)
+        printf 'May grant observed and spent for job %s\n' "$TEND_JOB_ID"
+        printf 'continuing with the approved action:\n'
+        cat "$action_file"
+        mkdir -p .tend-may
+        cp "$action_file" ".tend-may/$TEND_JOB_ID.completed"
+        ;;
+    75)
+        printf 'May parked job %s for a human decision\n' "$TEND_JOB_ID"
+        "$TEND" defer signal may-decision
+        exit 75
+        ;;
+    3)
+        printf 'May recorded a decline for job %s\n' "$TEND_JOB_ID" >&2
+        exit 3
+        ;;
+    *)
+        printf 'May gate failed for job %s with exit %s\n' "$TEND_JOB_ID" "$rc" >&2
+        exit 2
+        ;;
+esac

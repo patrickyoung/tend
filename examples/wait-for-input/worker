@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+mailbox=${TEND_WAIT_MAILBOX:-.tend-wait}
+response=$mailbox/$TEND_JOB_ID.response
+observed=$mailbox/$TEND_JOB_ID.observed
+
+mkdir -p "$mailbox"
+
+if test ! -f "$response"; then
+    printf 'waiting indefinitely for user input (job %s)\n' "$TEND_JOB_ID"
+    "$TEND" defer signal user-input
+    exit 75
+fi
+
+printf 'observed user input:\n'
+cat "$response"
+if test -s "$response" && test "$(tail -c 1 "$response" | wc -l | tr -d ' ')" = 0; then
+    printf '\n'
+fi
+
+mv "$response" "$observed"
+printf 'continuing after user input\n'
