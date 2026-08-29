@@ -424,6 +424,21 @@ AND output_digest IS NULL AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND status='u
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
+		var state, status string
+		var currentOut, currentErr sql.NullString
+		var currentOutSize, currentErrSize sql.NullInt64
+		e := c.QueryRowContext(ctx, `SELECT a.state,j.status,a.output_digest,
+a.output_size,a.stderr_digest,a.stderr_size FROM attempts a
+JOIN jobs j ON j.id=a.job_id WHERE a.id=? AND j.id=?`, attempt, id).Scan(
+			&state, &status, &currentOut, &currentOutSize, &currentErr,
+			&currentErrSize)
+		if e == nil && state == "unknown" && status == "unknown" &&
+			currentOut.Valid && currentOut.String == outDigest &&
+			currentOutSize.Valid && currentOutSize.Int64 == outSize &&
+			currentErr.Valid && currentErr.String == errDigest &&
+			currentErrSize.Valid && currentErrSize.Int64 == errSize {
+			return nil
+		}
 		return errors.New("unknown attempt changed while evidence was sealed")
 	}
 	seq, err := appendEvent(ctx, c, id, "attempt.output-sealed", map[string]any{

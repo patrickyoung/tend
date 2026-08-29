@@ -24,7 +24,7 @@ type artifactCheck struct {
 
 type attemptEvidence struct {
 	job, runDir, state string
-	number, pid        int
+	number             int
 	sealed             bool
 }
 
@@ -135,7 +135,7 @@ wait_key,wake_at_us,cancel_requested FROM jobs ORDER BY id`)
 	}
 	var attempts []attemptEvidence
 	arows, attemptErr := q.QueryContext(ctx, `SELECT j.id,j.run_dir,a.number,a.state,
-COALESCE(a.process_pid,0),a.output_digest IS NOT NULL FROM attempts a
+a.output_digest IS NOT NULL FROM attempts a
 JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 	if attemptErr != nil {
 		problems = append(problems, "attempt evidence: "+attemptErr.Error())
@@ -144,7 +144,7 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 			var item attemptEvidence
 			var sealed int
 			if err = arows.Scan(&item.job, &item.runDir, &item.number, &item.state,
-				&item.pid, &sealed); err != nil {
+				&sealed); err != nil {
 				problems = append(problems, "attempt evidence: "+err.Error())
 				break
 			}
@@ -208,8 +208,11 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 			if expectedArtifact[rel] {
 				continue
 			}
-			live := (attempt.state == "prepared" || attempt.state == "started") ||
-				(attempt.state == "unknown" && processGroupExists(attempt.pid))
+			// Unknown is a durable, operator-resolved state. Its known output
+			// files may remain unsealed after the process exits and before a
+			// resolver (or a late controller) records their digests.
+			live := attempt.state == "prepared" || attempt.state == "started" ||
+				attempt.state == "unknown"
 			if !live && !a.artifactNowRegistered(ctx, rel) {
 				problems = append(problems, "unsealed attempt evidence: "+rel)
 			}
@@ -232,7 +235,9 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
-			if !knownAttemptFiles[path] && !a.attemptPathNowActive(ctx, path) {
+			rel, _ := filepath.Rel(a.root, path)
+			if !knownAttemptFiles[path] && !a.artifactNowRegistered(ctx, rel) &&
+				!a.attemptPathNowActive(ctx, path) {
 				problems = append(problems, "unsealed attempt evidence: "+path)
 			}
 		}
