@@ -575,24 +575,33 @@ func TestLateControllerEvidenceConvergesWithUnknown(t *testing.T) {
 	if !strings.Contains(r.out, "attempt.effect-unknown") {
 		t.Fatalf("recovery: %s", r.out)
 	}
-	// Resolve after the private launcher exits, but before the stopped original
-	// controller can submit its late result.
-	resolveDeadline := time.Now().Add(4 * time.Second)
-	for {
-		r = runTend(t, root, nil, nil, "resolve", "late-evidence", "fail")
-		if r.code == 0 {
-			break
+	// Race resolution with the original controller's late result. On Linux an
+	// exited launcher remains visible in its process group as a zombie until
+	// this stopped parent resumes and reaps it, so resolving before SIGCONT is
+	// not a portable synchronization point.
+	resolved := make(chan result, 1)
+	go func() {
+		resolveDeadline := time.Now().Add(8 * time.Second)
+		for {
+			rr := runTend(t, root, nil, nil, "resolve", "late-evidence", "fail")
+			if rr.code == 0 || rr.code != 1 ||
+				!strings.Contains(rr.err, "launcher is still live") ||
+				time.Now().After(resolveDeadline) {
+				resolved <- rr
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
-		if r.code != 1 || !strings.Contains(r.err, "launcher is still live") || time.Now().After(resolveDeadline) {
-			t.Fatalf("resolve %d: %s %s", r.code, r.out, r.err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	}()
 	if err := syscall.Kill(cmd.Process.Pid, syscall.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("original worker: %v\nstdout: %s\nstderr: %s", err, out.String(), errout.String())
+	}
+	r = <-resolved
+	if r.code != 0 {
+		t.Fatalf("resolve %d: %s %s", r.code, r.out, r.err)
 	}
 	mustRun(t, root, nil, "check")
 }
