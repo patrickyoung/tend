@@ -235,7 +235,9 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
-			if !knownAttemptFiles[path] && !a.attemptPathNowActive(ctx, path) {
+			rel, _ := filepath.Rel(a.root, path)
+			if !knownAttemptFiles[path] && !a.artifactNowRegistered(ctx, rel) &&
+				!a.attemptPathNowActive(ctx, path) {
 				problems = append(problems, "unsealed attempt evidence: "+path)
 			}
 		}
