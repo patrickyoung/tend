@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 type app struct {
 	root        string
@@ -35,7 +35,7 @@ func realMain(args []string, in io.Reader, out, errout io.Writer) int {
 		return 0
 	}
 	if args[0] == "version" || args[0] == "--version" {
-		fmt.Fprintln(out, version)
+		fmt.Fprintln(out, "tend "+version)
 		return 0
 	}
 	if args[0] == "_exec" {
