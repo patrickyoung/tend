@@ -74,7 +74,7 @@ func mustRun(t *testing.T, root string, input *string, args ...string) result {
 
 func TestVersionIdentifiesCommand(t *testing.T) {
 	r := mustRun(t, t.TempDir(), nil, "version")
-	if r.out != "tend 0.1.1\n" || r.err != "" {
+	if r.out != "tend 0.1.2\n" || r.err != "" {
 		t.Fatalf("version stdout=%q stderr=%q", r.out, r.err)
 	}
 }

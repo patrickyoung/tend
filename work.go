@@ -38,6 +38,7 @@ type preparedExec struct {
 	input, output, stderr             *os.File
 	gateRead, gateWrite, controlRead  *os.File
 	controlWrite                      *os.File
+	activeLock                        *os.File
 	outputPath, stderrPath, outputDir string
 	deferPath                         string
 }
@@ -63,6 +64,10 @@ func (p *preparedExec) close() {
 	}
 	if p.controlWrite != nil {
 		_ = p.controlWrite.Close()
+	}
+	if p.activeLock != nil {
+		_ = p.activeLock.Close()
+		p.activeLock = nil
 	}
 	if p.deferPath != "" {
 		_ = os.Remove(p.deferPath)
@@ -154,13 +159,10 @@ func (a *app) prepareExecution(ctx context.Context, cl claim) (*preparedExec, er
 	p := &preparedExec{input: input}
 	defer func() {
 		if !ok {
+			if p.outputDir != "" {
+				_ = removePreparedFiles(p)
+			}
 			p.close()
-			if p.outputPath != "" {
-				_ = os.Remove(p.outputPath)
-			}
-			if p.stderrPath != "" {
-				_ = os.Remove(p.stderrPath)
-			}
 		}
 	}()
 	deferFile, err := os.CreateTemp("", "tend-defer-"+cl.Job.ID+"-")
@@ -186,6 +188,11 @@ func (a *app) prepareExecution(ctx context.Context, cl claim) (*preparedExec, er
 		return nil, err
 	}
 	if err := syncDir(cl.Job.RunDir); err != nil {
+		return nil, err
+	}
+	p.activeLock, err = acquireFileLock(ctx, filepath.Join(p.outputDir,
+		fmt.Sprintf("%03d.active.lock", cl.Attempt.Number)))
+	if err != nil {
 		return nil, err
 	}
 	p.outputPath = filepath.Join(p.outputDir, fmt.Sprintf("%03d.out", cl.Attempt.Number))

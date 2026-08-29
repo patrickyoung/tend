@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -213,7 +214,7 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 			// resolver (or a late controller) records their digests.
 			live := attempt.state == "prepared" || attempt.state == "started" ||
 				attempt.state == "unknown"
-			if !live && !a.artifactNowRegistered(ctx, rel) {
+			if !live && !a.attemptEvidenceNowExpected(ctx, path, rel) {
 				problems = append(problems, "unsealed attempt evidence: "+rel)
 			}
 		}
@@ -229,6 +230,9 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 			continue
 		}
 		for _, entry := range entries {
+			if isAttemptLockName(entry.Name()) {
+				continue
+			}
 			ext := filepath.Ext(entry.Name())
 			if ext != ".out" && ext != ".err" {
 				problems = append(problems, "unexpected attempt file: "+filepath.Join(dir, entry.Name()))
@@ -236,8 +240,7 @@ JOIN jobs j ON j.id=a.job_id ORDER BY j.id,a.number`)
 			}
 			path := filepath.Join(dir, entry.Name())
 			rel, _ := filepath.Rel(a.root, path)
-			if !knownAttemptFiles[path] && !a.artifactNowRegistered(ctx, rel) &&
-				!a.attemptPathNowActive(ctx, path) {
+			if !knownAttemptFiles[path] && !a.attemptEvidenceNowExpected(ctx, path, rel) {
 				problems = append(problems, "unsealed attempt evidence: "+path)
 			}
 		}
@@ -295,6 +298,47 @@ func fileLockHeld(path string) bool {
 		return false
 	}
 	return errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)
+}
+
+func isAttemptLockName(name string) bool {
+	const suffix = ".active.lock"
+	if !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	number, err := strconv.Atoi(strings.TrimSuffix(name, suffix))
+	return err == nil && number > 0 && fmt.Sprintf("%03d%s", number, suffix) == name
+}
+
+// attemptEvidenceNowExpected serializes the live database recheck with the
+// worker's filesystem-to-database sealing window. If the lock is held, the
+// evidence is still being produced. If we acquire it, no worker can cross the
+// boundary while the current database state is inspected.
+func (a *app) attemptEvidenceNowExpected(ctx context.Context, path, rel string) bool {
+	base := strings.TrimSuffix(path, filepath.Ext(path))
+	lockPath := base + ".active.lock"
+	lock, active := tryAttemptEvidenceLock(lockPath)
+	if active {
+		return true
+	}
+	if lock != nil {
+		defer func() {
+			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+			_ = lock.Close()
+		}()
+	}
+	return a.artifactNowRegistered(ctx, rel) || a.attemptPathNowActive(ctx, path)
+}
+
+func tryAttemptEvidenceLock(path string) (*os.File, bool) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return nil, false
+	}
+	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		return f, false
+	}
+	_ = f.Close()
+	return nil, errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)
 }
 
 func (a *app) jobDirNowReferenced(ctx context.Context, path string) bool {
