@@ -62,3 +62,8 @@ observes it after a durable wakeup, and continues.
 
 See [examples/may-approval](examples/may-approval/README.md) for the same
 durable pause composed with May's exact-action human approval gate.
+
+See [examples/agent-checkpoint](examples/agent-checkpoint/README.md) for a
+Tend-managed Agent run that continues the same Ply/Ask conversation after an
+explicit retry. Tend still treats a crash after process start as `unknown`;
+the checkpoint preserves context but never makes uncertain effects safe.

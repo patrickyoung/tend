@@ -84,8 +84,10 @@ SHA-256 and size.
 
 Tend is not distributed, multi-host, or safe on a network filesystem. It does
 not provide exactly-once effects, a workflow language, automatic retry policy,
-or granular recovery inside Ply. Until Ply exposes a public restartable step
-ABI, a whole Ply or Agent invocation is one opaque Tend attempt.
+or automatic resolution of started work. A restartable program may keep its
+own checkpoint and receive the same exact argv on explicit retry. Ply and
+Agent use that seam to preserve conversation context, but the whole process is
+still one Tend attempt and interrupted external effects remain uncertain.
 
 ## Check
 

@@ -394,6 +394,69 @@ func TestStartedCrashBecomesUnknownAndDoesNotRepeat(t *testing.T) {
 	mustRun(t, root, nil, "check")
 }
 
+func TestExplicitRetryResumesApplicationCheckpoint(t *testing.T) {
+	root := t.TempDir()
+	dir := t.TempDir()
+	checkpoint := filepath.Join(dir, "application.current")
+	started := filepath.Join(dir, "started")
+	worker := filepath.Join(dir, "worker")
+	script := `#!/bin/sh
+set -eu
+checkpoint=$1
+started=$2
+if [ ! -f "$checkpoint" ]; then
+  printf 'turn-one\n' >"$checkpoint"
+  touch "$started"
+  sleep 30
+fi
+printf 'resumed: '
+cat "$checkpoint"
+`
+	if err := os.WriteFile(worker, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, root, nil, "submit", "-id", "checkpoint-resume", "-C", dir,
+		"--", worker, checkpoint, started)
+	cmd := exec.Command(testBinary, "work")
+	cmd.Env = append(os.Environ(), "TEND_ROOT="+root, "TEND_LEASE=300ms")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitForPath(t, started, 3*time.Second)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	time.Sleep(700 * time.Millisecond)
+	r := mustRun(t, root, nil, "work")
+	if !strings.Contains(r.out, "attempt.effect-unknown") {
+		t.Fatalf("recovery: %s", r.out)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		r = runTend(t, root, nil, nil, "resolve", "checkpoint-resume", "retry")
+		if r.code == 0 {
+			break
+		}
+		if r.code != 1 || !strings.Contains(r.err, "launcher is still live") || time.Now().After(deadline) {
+			t.Fatalf("resolve retry %d: %s %s", r.code, r.out, r.err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mustRun(t, root, nil, "work")
+	if got := jobStatus(t, root, "checkpoint-resume"); got != "done" {
+		t.Fatalf("status %s", got)
+	}
+	out, err := os.ReadFile(filepath.Join(root, "jobs", "checkpoint-resume", "attempts", "002.out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "resumed: turn-one\n" {
+		t.Fatalf("resumed output %q", out)
+	}
+	mustRun(t, root, nil, "check")
+}
+
 func TestControllerCrashKillsLaunchedProcessGroup(t *testing.T) {
 	root, dir := t.TempDir(), t.TempDir()
 	late := filepath.Join(dir, "late")
